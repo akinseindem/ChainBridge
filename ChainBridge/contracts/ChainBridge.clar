@@ -277,4 +277,74 @@
   }
 )
 
+;; Advanced Cross-Chain Escrow System with Multi-Signature Support
+;; This function creates a secure escrow for cross-chain NFT transfers
+;; Includes time-locked releases, dispute resolution, and multi-party validation
+(define-public (create-cross-chain-escrow
+  (nft-contract principal)
+  (token-id uint)
+  (buyer principal)
+  (price uint)
+  (source-chain uint)
+  (target-chain uint)
+  (escrow-duration uint)
+  (validator-addresses (list 3 principal)))
+  (let (
+    (escrow-id (generate-escrow-id))
+    (escrow-key { escrow-id: escrow-id })
+    (listing-key { token-id: token-id, contract-address: nft-contract })
+    (listing (unwrap! (map-get? nft-listings listing-key) ERR-NOT-FOUND))
+    (required-deposit (+ price (calculate-fee price)))
+    (validator-count (len validator-addresses))
+  )
+    ;; Validate escrow parameters
+    (asserts! (is-valid-chain source-chain) ERR-INVALID-CHAIN)
+    (asserts! (is-valid-chain target-chain) ERR-INVALID-CHAIN)
+    (asserts! (not (is-eq source-chain target-chain)) ERR-INVALID-CHAIN)
+    (asserts! (is-eq (get seller listing) tx-sender) ERR-UNAUTHORIZED)
+    (asserts! (get cross-chain-enabled listing) ERR-UNAUTHORIZED)
+    (asserts! (> escrow-duration u0) ERR-INVALID-PRICE)
+    (asserts! (<= validator-count u3) ERR-INVALID-PRICE)
+    
+    ;; Lock funds in escrow from buyer
+    (try! (stx-transfer? required-deposit buyer (as-contract tx-sender)))
+    
+    ;; Create escrow record with enhanced security features
+    (map-set cross-chain-escrow escrow-key
+      {
+        nft-contract: nft-contract,
+        token-id: token-id,
+        seller: tx-sender,
+        buyer: buyer,
+        price: price,
+        source-chain: source-chain,
+        target-chain: target-chain,
+        created-at: block-height,
+        status: "pending"
+      }
+    )
+    
+    ;; Update listing to reflect escrow status
+    (map-set nft-listings listing-key
+      (merge listing { status: "in-escrow" })
+    )
+    
+    ;; Initialize validator consensus tracking
+    (map-set escrow-validators escrow-key
+      {
+        validators: validator-addresses,
+        confirmations: (list),
+        required-confirmations: (if (> validator-count u0) 
+                                   (/ (+ validator-count u1) u2) 
+                                   u1),
+        dispute-raised: false,
+        auto-release-height: (+ block-height escrow-duration),
+        dispute-deadline: (+ block-height (/ escrow-duration u2))
+      }
+    )
+    
+    (ok { escrow-id: escrow-id, required-deposit: required-deposit, validators: validator-addresses })
+  )
+)
+
 
